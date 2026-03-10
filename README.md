@@ -25,7 +25,7 @@ It is highly recommended to use a virtual environment to manage dependencies.
 ### Installation
 1. Clone the repository:
    ```bash
-   git clone 
+   git clone https://github.com/correaandrea/VehicleMotionAnalysis-DIP.git
 
 2. Install dependencies:
    ```bash
