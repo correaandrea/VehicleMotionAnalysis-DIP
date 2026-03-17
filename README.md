@@ -3,7 +3,7 @@
 This project was developed for the **Digital Image Processing** course (2026-1). It focuses on extracting kinematic parameters from a vehicle's motion using computer vision techniques.
 
 ## Objective
-The objective of this project is to analyze the motion of a vehicle from a video recording. We apply digital image processing and computer vision techniques—including segmentation, morphology, contour detection, centroid calculation, and numerical derivation—to estimate the vehicle's position, velocity, and acceleration over time, comparing experimental results with theoretical kinematic models.
+The objective of this project is to analyze the motion of a vehicle from a video recording. We apply digital image processing and computer vision techniques including segmentation, morphology, contour detection, centroid calculation, and numerical derivation to estimate the vehicle's position, velocity, and acceleration over time, comparing experimental results with theoretical kinematic models.
 
 ## Project Team
 * **Member 1:** Andrea Correa Arango | ID: 1001391488
