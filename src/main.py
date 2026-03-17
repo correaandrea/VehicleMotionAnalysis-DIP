@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import os
+from utils import calcular_centroide
 
 # --- 1. CONFIGURACIÓN DE RUTAS ---
 # Usamos rutas relativas para que funcione en las PCs de los 3 integrantes
@@ -12,6 +13,8 @@ VIDEO_PATH = os.path.join(SCRIPT_DIR, '..', 'data', 'VideoPDI.mp4')
 pausar_video = False
 mostrar_pixel = False
 x_pixel, y_pixel = 0, 0
+trayectoria = []
+posiciones_x = []
 
 # --- 3. FUNCIONES DE INTERACCIÓN (CALLBACKS) ---
 def mouse_callback(event, x, y, flags, param):
@@ -59,6 +62,14 @@ cv2.createTrackbar("V Max", "Trackbars", 255, 255, nothing)
 
 print(f"Procesando video a {ancho_visualizacion}x{alto_visualizacion} px.")
 
+fps = cap.get(cv2.CAP_PROP_FPS)
+print("FPS", fps)
+
+fgbg = cv2.createBackgroundSubtractorMOG2(
+    history=500,
+    varThreshold=50,
+    detectShadows=False
+)
 # --- 7. BUCLE PRINCIPAL ---
 while True:
     if not pausar_video:
@@ -85,21 +96,34 @@ while True:
         cv2.putText(frame_display, f'Pos:({x_pixel},{y_pixel}) HSV:{color_hsv}', (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-    # SEGMENTACIÓN: Convertir a espacio HSV [cite: 16]
-    hsv_frame = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2HSV)
+    mascara = fgbg.apply(frame_resized)
 
-    # Leer valores de los Trackbars para el umbralamiento (Thresholding) [cite: 17]
-    h_min = cv2.getTrackbarPos("H Min", "Trackbars")
-    h_max = cv2.getTrackbarPos("H Max", "Trackbars")
-    s_min = cv2.getTrackbarPos("S Min", "Trackbars")
-    s_max = cv2.getTrackbarPos("S Max", "Trackbars")
-    v_min = cv2.getTrackbarPos("V Min", "Trackbars")
-    v_max = cv2.getTrackbarPos("V Max", "Trackbars")
+    #operaciones morfologicas para limpiar ruido
+    kernel = np.ones((9, 9), np.uint8)
+    mascara = cv2.morphologyEx(mascara, cv2.MORPH_OPEN, kernel)
+    mascara = cv2.morphologyEx(mascara, cv2.MORPH_CLOSE, kernel)
 
-    # Definir rangos y crear la máscara binaria [cite: 17]
-    rango_bajo = np.array([h_min, s_min, v_min])
-    rango_alto = np.array([h_max, s_max, v_max])
-    mascara = cv2.inRange(hsv_frame, rango_bajo, rango_alto)
+    centroide, contorno = calcular_centroide(mascara)
+
+    if centroide is not None:
+        cx, cy = centroide
+        trayectoria.append((cx, cy))
+        if len(trayectoria) > 120:
+            trayectoria.pop(0)
+        posiciones_x.append(cx)
+
+        # Dibujar centroide
+        cv2.circle(frame_display, (cx, cy), 6, (0,0,255), -1)
+
+        # Dibujar contorno
+        cv2.drawContours(frame_display, [contorno], -1, (0,255,0), 2)
+
+    for i in range(1, len(trayectoria)):
+        cv2.line(frame_display,
+             trayectoria[i-1],
+             trayectoria[i],
+             (255,0,0),
+             2)
 
     # MOSTRAR VENTANAS
     cv2.imshow('Video', frame_display)
