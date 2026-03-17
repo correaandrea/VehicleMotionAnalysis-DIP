@@ -8,7 +8,7 @@ The objective of this project is to analyze the motion of a vehicle from a video
 ## Project Team
 * **Member 1:** Andrea Correa Arango | ID: 1001391488
 * **Member 2:** Julián Isaza Marín | ID: [Number]
-* **Member 3:** Simón Sanchez Sepúlveda | ID: [Number]
+* **Member 3:** Simón Sanchez Sepúlveda | ID: 1193042029
 
 ## Technologies
 * **Language:** Python 
