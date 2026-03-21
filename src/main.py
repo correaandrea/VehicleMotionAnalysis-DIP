@@ -1,138 +1,169 @@
+import os
 import cv2
 import numpy as np
-import os
-from utils import calcular_centroide
+import matplotlib.pyplot as plt
+from utils import calcular_centroide, calcular_cinematica
 
-# --- 1. CONFIGURACIÓN DE RUTAS ---
-# Usamos rutas relativas para que funcione en las PCs de los 3 integrantes
+# 1. CONFIGURACIÓN GENERAL Y RUTAS
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# Asegúrate de que el video esté en la carpeta /data con este nombre
 VIDEO_PATH = os.path.join(SCRIPT_DIR, '..', 'data', 'VideoPDI.mp4')
 
-# --- 2. VARIABLES GLOBALES ---
+
+# 2. PARÁMETROS FÍSICOS Y DE MEDICIÓN
+# Límites espaciales para el análisis cinemático (Eje X)
+MARCADOR_A = 387
+MARCADOR_B = 718
+
+# Calibración de escala (Metros por Píxel)
+LONGITUD_CARRO_PIXELES = 41.0
+LONGITUD_CARRO_METROS = 4.07
+FACTOR_ESCALA = LONGITUD_CARRO_METROS / LONGITUD_CARRO_PIXELES
+
+# 3. VARIABLES GLOBALES DE ESTADO
 pausar_video = False
 mostrar_pixel = False
 x_pixel, y_pixel = 0, 0
+
+# Almacenamiento de datos cinemáticos
 trayectoria = []
 posiciones_x = []
 
-# --- 3. FUNCIONES DE INTERACCIÓN (CALLBACKS) ---
+# 4. FUNCIONES DE INTERACCIÓN (HERRAMIENTAS DE DEPURACIÓN)
 def mouse_callback(event, x, y, flags, param):
+    """
+    Captura eventos del mouse para análisis interactivo de píxeles y control de flujo.
+    """
     global pausar_video, mostrar_pixel, x_pixel, y_pixel
-    # Click Izquierdo: Captura posición y color (útil para el Punto 2 y 3) 
     if event == cv2.EVENT_LBUTTONDOWN:
         x_pixel, y_pixel = x, y
         mostrar_pixel = True
-    # Click Derecho: Pausa el video para analizar mejor un frame
-    if event == cv2.EVENT_RBUTTONDOWN:
+    elif event == cv2.EVENT_RBUTTONDOWN:
         pausar_video = not pausar_video
 
-def nothing(x):
-    pass
-
-# --- 4. INICIALIZACIÓN DE VIDEO ---
+# 5. INICIALIZACIÓN DE VIDEO Y ENTORNOS
 cap = cv2.VideoCapture(VIDEO_PATH)
 
 if not cap.isOpened():
-    print(f"Error crítico: No se encontró el video en {VIDEO_PATH}")
-    print("Verifica que el nombre sea VideoPDI.mp4 y esté dentro de la carpeta /data")
+    print(f"[ERROR] No se pudo inicializar el flujo de video en: {VIDEO_PATH}")
     exit()
 
-# --- 5. CONFIGURACIÓN DE PROPORCIÓN (FIX ASPECT RATIO) ---
-# Definimos un ancho fijo y calculamos el alto para evitar que el video se estire
+# Ajuste de proporción (Aspect Ratio)
 ancho_visualizacion = 800 
-ancho_original = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-alto_original = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-
-aspect_ratio = alto_original / ancho_original
+aspect_ratio = cap.get(cv2.CAP_PROP_FRAME_HEIGHT) / cap.get(cv2.CAP_PROP_FRAME_WIDTH)
 alto_visualizacion = int(ancho_visualizacion * aspect_ratio)
 
-# --- 6. VENTANAS Y CONTROLES (TRACKBARS) ---
-cv2.namedWindow('Video')
-cv2.setMouseCallback('Video', mouse_callback)
-
-# Ventana para calibrar la segmentación HSV 
-cv2.namedWindow("Trackbars")
-cv2.createTrackbar("H Min", "Trackbars", 0, 179, nothing)
-cv2.createTrackbar("H Max", "Trackbars", 179, 179, nothing)
-cv2.createTrackbar("S Min", "Trackbars", 0, 255, nothing)
-cv2.createTrackbar("S Max", "Trackbars", 255, 255, nothing)
-cv2.createTrackbar("V Min", "Trackbars", 0, 255, nothing)
-cv2.createTrackbar("V Max", "Trackbars", 255, 255, nothing)
-
-print(f"Procesando video a {ancho_visualizacion}x{alto_visualizacion} px.")
-
 fps = cap.get(cv2.CAP_PROP_FPS)
-print("FPS", fps)
+print(f"[INFO] Video cargado: {ancho_visualizacion}x{alto_visualizacion} a {fps} FPS")
 
-fgbg = cv2.createBackgroundSubtractorMOG2(
-    history=500,
-    varThreshold=50,
-    detectShadows=False
-)
-# --- 7. BUCLE PRINCIPAL ---
+cv2.namedWindow('Analisis Matematico')
+cv2.setMouseCallback('Analisis Matematico', mouse_callback)
+
+# Inicialización del modelo de Sustracción de Fondo MOG2 
+fgbg = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=50, detectShadows=False)
+
+# 6. BUCLE PRINCIPAL DE PROCESAMIENTO
 while True:
     if not pausar_video:
         ret, frame = cap.read()
         if not ret:
-            # Si el video termina, vuelve a empezar (loop)
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            trayectoria.clear() 
+            posiciones_x.clear()
             continue
         
-        # Redimensionar manteniendo la proporción para no deformar el vehículo
         frame_resized = cv2.resize(frame, (ancho_visualizacion, alto_visualizacion))
         
-    # Crear copia para no rayar el frame original con texto
     frame_display = frame_resized.copy()
 
-    # Mostrar información del píxel si se hizo click [cite: 22]
+    # Herramienta de depuración interactiva en pantalla
     if mostrar_pixel:
-        # Obtener color en formato BGR del frame redimensionado
-        color_bgr = frame_resized[y_pixel, x_pixel]
-        # Convertir ese frame a HSV solo para leer el valor del píxel seleccionado [cite: 16]
         temp_hsv = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2HSV)
         color_hsv = temp_hsv[y_pixel, x_pixel]
-        
         cv2.putText(frame_display, f'Pos:({x_pixel},{y_pixel}) HSV:{color_hsv}', (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
+    # FASE A: Segmentación y Morfología 
     mascara = fgbg.apply(frame_resized)
 
-    #operaciones morfologicas para limpiar ruido
-    kernel = np.ones((9, 9), np.uint8)
-    mascara = cv2.morphologyEx(mascara, cv2.MORPH_OPEN, kernel)
-    mascara = cv2.morphologyEx(mascara, cv2.MORPH_CLOSE, kernel)
+    # Filtros morfológicos para aislamiento del vehículo
+    kernel_apertura = np.ones((5, 5), np.uint8)
+    kernel_cierre = np.ones((15, 25), np.uint8) 
+    
+    mascara = cv2.morphologyEx(mascara, cv2.MORPH_OPEN, kernel_apertura) # Reducción de ruido
+    mascara = cv2.morphologyEx(mascara, cv2.MORPH_CLOSE, kernel_cierre)  # Relleno de oclusiones
 
     centroide, contorno = calcular_centroide(mascara)
 
+    # FASE B: Rastreo y Adquisición de Datos
     if centroide is not None:
         cx, cy = centroide
-        trayectoria.append((cx, cy))
-        if len(trayectoria) > 120:
-            trayectoria.pop(0)
-        posiciones_x.append(cx)
+        
+        # Registro condicional basado en límites espaciales (Marcadores A y B)
+        if MARCADOR_A <= cx <= MARCADOR_B and not pausar_video:
+            trayectoria.append((cx, cy))
+            posiciones_x.append(cx)
+            if len(trayectoria) > 120:
+                trayectoria.pop(0)
 
-        # Dibujar centroide
-        cv2.circle(frame_display, (cx, cy), 6, (0,0,255), -1)
+        cv2.circle(frame_display, (cx, cy), 6, (0, 0, 255), -1)
+        cv2.drawContours(frame_display, [contorno], -1, (0, 255, 0), 2)
 
-        # Dibujar contorno
-        cv2.drawContours(frame_display, [contorno], -1, (0,255,0), 2)
-
+    # Dibujo de la trayectoria histórica 
     for i in range(1, len(trayectoria)):
-        cv2.line(frame_display,
-             trayectoria[i-1],
-             trayectoria[i],
-             (255,0,0),
-             2)
+        cv2.line(frame_display, trayectoria[i-1], trayectoria[i], (255, 0, 0), 2)
 
-    # MOSTRAR VENTANAS
-    cv2.imshow('Video', frame_display)
-    cv2.imshow('Mascara (Segmentacion)', mascara)
+    # FASE C: Cálculo Cinemático en Tiempo Real 
+    if len(posiciones_x) >= 3:
+        pos_m, vel, acel = calcular_cinematica(posiciones_x, fps, FACTOR_ESCALA)
+        if len(vel) > 0:
+            vel_kmh = vel[-1] * 3.6 
+            texto_vel = f"Velocidad: {vel_kmh:.1f} km/h"
+            cv2.putText(frame_display, texto_vel, (30, 70), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
 
-    # Salir con la tecla ESC
-    if cv2.waitKey(30) & 0xFF == 27:
+    # FASE D: Renderizado
+    cv2.imshow('Analisis Matematico', frame_display)
+    cv2.imshow('Mascara de Segmentacion', mascara)
+
+    if cv2.waitKey(30) & 0xFF == 27: # Tecla ESC para salir
         break
 
-# --- 8. LIMPIEZA ---
 cap.release()
 cv2.destroyAllWindows()
+
+# 7. EXPORTACIÓN DE RESULTADOS Y GRÁFICAS CINEMÁTICAS 
+if len(posiciones_x) >= 3:
+    print("\n[INFO] Generando gráficas cinemáticas...")
+    
+    pos_m, vel, acel = calcular_cinematica(posiciones_x, fps, FACTOR_ESCALA)
+    
+    tiempo = np.arange(len(pos_m)) / fps
+    tiempo_vel = tiempo[:-1]
+    tiempo_acel = tiempo_vel[:-1]
+    
+    vel_kmh = vel * 3.6
+
+    fig, axs = plt.subplots(3, 1, figsize=(10, 8))
+    fig.suptitle('Análisis Cinemático del Vehículo', fontsize=16)
+    
+    axs[0].plot(tiempo, pos_m, 'b-', linewidth=2)
+    axs[0].set_title('Posición vs Tiempo')
+    axs[0].set_ylabel('Posición (m)')
+    axs[0].grid(True)
+    
+    axs[1].plot(tiempo_vel, vel_kmh, 'g-', linewidth=2)
+    axs[1].set_title('Velocidad vs Tiempo')
+    axs[1].set_ylabel('Velocidad (km/h)')
+    axs[1].grid(True)
+    
+    axs[2].plot(tiempo_acel, acel, 'r-', linewidth=2)
+    axs[2].set_title('Aceleración vs Tiempo')
+    axs[2].set_xlabel('Tiempo (s)')
+    axs[2].set_ylabel('Aceleración (m/s²)')
+    axs[2].grid(True)
+    
+    plt.tight_layout()
+    ruta_guardado = os.path.join(SCRIPT_DIR, '..', 'results', 'graficas_cinematicas.png')
+    plt.savefig(ruta_guardado)
+    print(f"[INFO] Gráficas exportadas exitosamente en: {ruta_guardado}")
+    plt.show()
